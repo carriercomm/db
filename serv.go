@@ -8,9 +8,7 @@
 package db
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -68,40 +66,6 @@ func (self *Server) ListenAndServe(port int) {
 			log.Println(err)
 			continue
 		}
-		go self.HandleConn(conn)
-	}
-}
-
-// handle "micro-threaded" connection
-func (self *Server) HandleConn(conn net.Conn) {
-	dec, enc := json.NewDecoder(conn), json.NewEncoder(conn)
-	for {
-		var m Msg
-		if err := dec.Decode(&m); err == io.EOF {
-			break
-		} else if err != nil {
-			conn.Close()
-			return
-		} else {
-			conn.SetDeadline(time.Now().Add(time.Minute * 15))
-		}
-		switch m.Cmd {
-		case "has":
-			enc.Encode(self.st.Has(&m))
-		case "set":
-			enc.Encode(self.st.Set(&m))
-		case "get":
-			enc.Encode(self.st.Get(&m))
-		case "del":
-			enc.Encode(self.st.Del(&m))
-		case "qry":
-			enc.Encode(self.st.Qry(&m))
-		case "dsk":
-			enc.Encode(self.st.Dsk(&m))
-		case "bye":
-			conn.SetDeadline(time.Now())
-		default:
-			enc.Encode(Msg{Val: false})
-		}
+		go self.st.HandleConn(conn)
 	}
 }

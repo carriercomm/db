@@ -9,11 +9,14 @@ package db
 
 import (
 	"encoding/json"
+	"io"
 	"log"
+	"net"
 	"os"
 	"reflect"
 	"runtime/debug"
 	"sync"
+	"time"
 )
 
 // data store
@@ -30,43 +33,46 @@ func InitStore() *Store {
 }
 
 // store has method
-func (self *Store) Has(m *Msg) Msg {
+func (self *Store) Has(m *Msg) *Msg {
 	self.RLock()
 	_, ok := self.data[m.Key]
 	self.RUnlock()
-	return Msg{Val: ok}
+	m, m.Val = &Msg{}, ok
+	return m
 }
 
 // store set method
-func (self *Store) Set(m *Msg) Msg {
+func (self *Store) Set(m *Msg) *Msg {
 	self.Lock()
 	self.data[m.Key] = m.Val
 	_, ok := self.data[m.Key]
 	self.Unlock()
-	return Msg{Val: ok}
+	m, m.Val = &Msg{}, ok
+	return m
 }
 
 // store get method
-func (self *Store) Get(m *Msg) Msg {
+func (self *Store) Get(m *Msg) *Msg {
 	self.RLock()
 	v := Match(self.data, MatchCleaner(m.Val), 0)
 	self.RUnlock()
-	return Msg{Val: v}
+	m, m.Val = &Msg{}, v
+	return m
 }
 
 // store del method
-func (self *Store) Del(m *Msg) Msg {
+func (self *Store) Del(m *Msg) *Msg {
 	self.Lock()
 	delete(self.data, m.Key)
 	_, ok := self.data[m.Key]
 	self.Unlock()
-	return Msg{Val: !ok}
+	m, m.Val = &Msg{}, ok
+	return m
 }
 
 // store query method
 // requires map[string]interface{} (aka json object) as a query term
-func (self *Store) Qry(m *Msg) Msg {
-	var nm Msg
+func (self *Store) Qry(m *Msg) *Msg {
 	switch m.Val.(type) {
 	case map[string]interface{}:
 		var set []interface{}
@@ -99,23 +105,24 @@ func (self *Store) Qry(m *Msg) Msg {
 			}
 		}
 		if len(set) < 1 {
-			nm.Val = nil
+			m, m.Val = &Msg{}, nil
 		} else {
-			nm.Val = set
+			m, m.Val = &Msg{}, set
 		}
 	default:
-		nm.Val = nil
+		m, m.Val = &Msg{}, nil
 	}
-	return nm
+	return m
 }
 
 // store dsk (save/load) calls
-func (self *Store) Dsk(m *Msg) Msg {
+func (self *Store) Dsk(m *Msg) *Msg {
 	switch m.Key {
 	case "save":
 		fd, err := os.Create("data.json")
 		if err != nil {
-			return Msg{Val: false}
+			m, m.Val = &Msg{}, false
+			return m
 		}
 		self.RLock()
 		json.NewEncoder(fd).Encode(self.data)
@@ -124,11 +131,13 @@ func (self *Store) Dsk(m *Msg) Msg {
 			log.Fatal(err)
 		}
 		debug.FreeOSMemory()
-		return Msg{Val: true}
+		m, m.Val = &Msg{}, true
+		return m
 	case "load":
 		fd, err := os.Open("data.json")
 		if err != nil {
-			return Msg{Val: false}
+			m, m.Val = &Msg{}, false
+			return m
 		}
 		self.Lock()
 		self.data = map[string]interface{}{}
@@ -138,8 +147,44 @@ func (self *Store) Dsk(m *Msg) Msg {
 			log.Fatal(err)
 		}
 		debug.FreeOSMemory()
-		return Msg{Val: true}
+		m, m.Val = &Msg{}, true
+		return m
 	default:
-		return Msg{Val: false}
+		m, m.Val = &Msg{}, false
+		return m
+	}
+}
+
+// handle "micro-threaded" connection
+func (self *Store) HandleConn(conn net.Conn) {
+	dec, enc := json.NewDecoder(conn), json.NewEncoder(conn)
+	for {
+		var m Msg
+		if err := dec.Decode(&m); err == io.EOF {
+			break
+		} else if err != nil {
+			conn.Close()
+			return
+		} else {
+			conn.SetDeadline(time.Now().Add(time.Minute * 15))
+		}
+		switch m.Cmd {
+		case "has":
+			enc.Encode(self.Has(&m))
+		case "set":
+			enc.Encode(self.Set(&m))
+		case "get":
+			enc.Encode(self.Get(&m))
+		case "del":
+			enc.Encode(self.Del(&m))
+		case "qry":
+			enc.Encode(self.Qry(&m))
+		case "dsk":
+			enc.Encode(self.Dsk(&m))
+		case "bye":
+			conn.SetDeadline(time.Now())
+		default:
+			enc.Encode(Msg{Val: false})
+		}
 	}
 }
