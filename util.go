@@ -12,6 +12,13 @@ import (
 	"reflect"
 )
 
+// transport schema
+type Msg struct {
+	Cmd string      `json:"cmd,omitempty"`
+	Key string      `json:"key,omitempty"`
+	Val interface{} `json:"val,omitempty"`
+}
+
 // clean interface value, return string slice
 func MatchCleaner(v interface{}) []string {
 	var ss []string

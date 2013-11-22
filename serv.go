@@ -17,13 +17,6 @@ import (
 	"time"
 )
 
-// transport schema
-type Msg struct {
-	Cmd string      `json:"cmd,omitempty"`
-	Key string      `json:"key,omitempty"`
-	Val interface{} `json:"val,omitempty"`
-}
-
 // data store
 type Server struct {
 	st   *Store
